@@ -1,117 +1,99 @@
-use std::abi::sol
 use ingot::reliability::Bin
-use ingot::scoring::{Brier, Quartic, ScoringRule}
-use ingot::summary::ForecastSummary
+use ingot::scoring::{Brier, Ledger, ScoringRule}
+use std::abi::sol
+
+const COUNT_MASK: u256 = 18446744073709551615
 
 pub msg ForecastLensMsg {
     #[selector = sol("record(uint256,bool)")]
     Record { probability: u256, outcome: bool } -> u256,
 
     #[selector = sol("scores()")]
-    Scores -> (u256, u256, u256),
+    Scores -> (u256, u256),
 
     #[selector = sol("bin(uint256)")]
     BinView { index: u256 } -> (u256, u256, u256, u256, u256),
 }
 
-/// Persistent sufficient statistics. No raw event is retained.
-pub struct ForecastStore {
-    count: u256,
-    brier_sum: u256,
-    quartic_sum: u256,
-    b0_count: u256,
-    b0_probability_sum: u256,
-    b0_positives: u256,
-    b1_count: u256,
-    b1_probability_sum: u256,
-    b1_positives: u256,
-    b2_count: u256,
-    b2_probability_sum: u256,
-    b2_positives: u256,
-    b3_count: u256,
-    b3_probability_sum: u256,
-    b3_positives: u256,
-    b4_count: u256,
-    b4_probability_sum: u256,
-    b4_positives: u256,
+/// Six storage words total: one packed Brier ledger plus five packed bins.
+/// The second proper rule stays in the pure generic library. Persisting it
+/// would add one SSTORE to every forecast without improving calibration.
+pub struct ForecastStore { score: u256, b0: u256, b1: u256, b2: u256, b3: u256, b4: u256 }
+
+fn pack_score(_ count: u256, _ brier_sum: u256) -> u256 {
+    assert!(count <= COUNT_MASK)
+    count | (brier_sum << 64)
 }
 
-fn load_summary() -> ForecastSummary uses (store: ForecastStore) {
-    ForecastSummary::from_parts(
-        store.count,
-        store.brier_sum,
-        store.quartic_sum,
-        Bin::from_parts(
-            store.b0_count,
-            store.b0_probability_sum,
-            store.b0_positives,
-        ),
-        Bin::from_parts(
-            store.b1_count,
-            store.b1_probability_sum,
-            store.b1_positives,
-        ),
-        Bin::from_parts(
-            store.b2_count,
-            store.b2_probability_sum,
-            store.b2_positives,
-        ),
-        Bin::from_parts(
-            store.b3_count,
-            store.b3_probability_sum,
-            store.b3_positives,
-        ),
-        Bin::from_parts(
-            store.b4_count,
-            store.b4_probability_sum,
-            store.b4_positives,
-        ),
-    )
+fn score_parts(_ packed: u256) -> (u256, u256) {
+    (packed & COUNT_MASK, packed >> 64)
+}
+
+// Bin layout: low 64 bits count, next 64 positives, high 128 probability sum.
+fn pack_bin(_ count: u256, _ probability_sum: u256, _ positives: u256) -> u256 {
+    assert!(count <= COUNT_MASK)
+    assert!(positives <= count)
+    assert!(probability_sum <= count * 1000000)
+    count | (positives << 64) | (probability_sum << 128)
+}
+
+fn bin_parts(_ packed: u256) -> (u256, u256, u256) {
+    let count = packed & COUNT_MASK
+    let positives = (packed >> 64) & COUNT_MASK
+    let probability_sum = packed >> 128
+    (count, probability_sum, positives)
+}
+
+fn add_bin(_ packed: u256, _ probability: u256, _ outcome: bool) -> u256 {
+    let (count, probability_sum, positives) = bin_parts(packed)
+    let next_positives = positives + if outcome { 1 } else { 0 }
+    pack_bin(count + 1, probability_sum + probability, next_positives)
 }
 
 fn record_store(_ probability: u256, _ outcome: bool) -> u256
 uses (store: mut ForecastStore)
 {
     assert!(probability <= 1000000)
-    assert!(store.count < 18446744073709551615)
-
-    // The only stateful part is addition of the pure event statistics.
-    store.count += 1
-    store.brier_sum += Brier::loss_numerator(probability, outcome)
-    store.quartic_sum += Quartic::loss_numerator(probability, outcome)
+    let (count, brier_sum) = score_parts(store.score)
+    assert!(count < COUNT_MASK)
+    store.score = pack_score(
+        count + 1,
+        brier_sum + Brier::loss_numerator(probability, outcome),
+    )
 
     if probability < 200000 {
-        store.b0_count += 1
-        store.b0_probability_sum += probability
-        if outcome {
-            store.b0_positives += 1
-        }
+        store.b0 = add_bin(store.b0, probability, outcome)
     } else if probability < 400000 {
-        store.b1_count += 1
-        store.b1_probability_sum += probability
-        if outcome {
-            store.b1_positives += 1
-        }
+        store.b1 = add_bin(store.b1, probability, outcome)
     } else if probability < 600000 {
-        store.b2_count += 1
-        store.b2_probability_sum += probability
-        if outcome {
-            store.b2_positives += 1
-        }
+        store.b2 = add_bin(store.b2, probability, outcome)
     } else if probability < 800000 {
-        store.b3_count += 1
-        store.b3_probability_sum += probability
-        if outcome {
-            store.b3_positives += 1
-        }
+        store.b3 = add_bin(store.b3, probability, outcome)
     } else {
-        store.b4_count += 1
-        store.b4_probability_sum += probability
-        if outcome {
-            store.b4_positives += 1
-        }
+        store.b4 = add_bin(store.b4, probability, outcome)
     }
-    store.count
+    count + 1
+}
+
+fn brier_score() -> (u256, u256) uses (store: ForecastStore) {
+    let (count, brier_sum) = score_parts(store.score)
+    let ledger = Ledger::from_parts(Brier {}, count, brier_sum)
+    (count, ledger.score_micro())
+}
+
+fn bin_view(_ index: u256) -> (u256, u256, u256, u256, u256)
+uses (store: ForecastStore)
+{
+    assert!(index < 5)
+    let packed = if index == 0 {
+        store.b0
+    } else if index == 1 {
+        store.b1
+    } else if index == 2 {
+        store.b2
+    } else if index == 3 { store.b3 } else { store.b4 }
+    let (count, probability_sum, positives) = bin_parts(packed)
+    Bin::from_parts(count, probability_sum, positives).snapshot()
 }
 
 pub contract ForecastLens {
@@ -122,16 +104,14 @@ pub contract ForecastLens {
             record_store(probability, outcome)
         }
 
-        Scores -> (u256, u256, u256) uses (store) {
-            let summary = load_summary()
-            let (brier, quartic) = summary.scores()
-            (summary.count(), brier, quartic)
+        Scores -> (u256, u256) uses (store) {
+            brier_score()
         }
 
         BinView { index } -> (u256, u256, u256, u256, u256)
         uses (store)
         {
-            load_summary().bin(index)
+            bin_view(index)
         }
     }
 }

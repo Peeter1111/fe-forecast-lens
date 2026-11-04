@@ -108,7 +108,7 @@ fn contract_message_group_records_and_reads() uses (evm: mut Evm) {
         )
     assert!(n1 == 1 && n2 == 2)
 
-    let (count, brier, quartic): (u256, u256, u256) = evm
+    let (count, brier): (u256, u256) = evm
         .call(
             addr: lens,
             gas: 2000000,
@@ -117,7 +117,6 @@ fn contract_message_group_records_and_reads() uses (evm: mut Evm) {
         )
     assert!(count == 2)
     assert!(brier == 250000)
-    assert!(quartic == 312500)
 
     let (bin_count, quoted, observed, lower, upper): (u256, u256, u256, u256, u256) = evm
         .call(

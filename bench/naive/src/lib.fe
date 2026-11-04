@@ -1,0 +1,29 @@
+use std::abi::sol
+use std::evm::StorageMap
+
+pub struct NaiveStore {
+    count: u256,
+    events: StorageMap<u256, u256>,
+}
+
+pub msg NaiveMsg {
+    #[selector = sol("record(uint256,bool)")]
+    Record { probability: u256, outcome: bool } -> u256,
+}
+
+/// Deliberately wasteful benchmark control: every raw forecast is retained.
+pub contract NaiveArchive {
+    mut store: NaiveStore,
+
+    recv NaiveMsg {
+        Record { probability, outcome } -> u256 uses (mut store) {
+            assert!(probability <= 1000000)
+            let outcome_bit: u256 = if outcome { 1 } else { 0 }
+            let encoded = probability * 2 + outcome_bit
+            let index = store.count
+            store.events.set(key: index, value: encoded)
+            store.count += 1
+            store.count
+        }
+    }
+}
