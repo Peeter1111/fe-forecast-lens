@@ -146,6 +146,10 @@ def spotcheck_trades(rows: list[dict], raw_dir: Path, count: int = 24) -> dict:
 def build_fixture(rows: list[dict], manifest: list[dict], spotcheck: dict) -> dict:
     encoded = [row["probability_micro"] * 2 + row["outcome"] for row in rows]
     frequencies = sorted(collections.Counter(encoded).items())
+    canonical_rows = "\n".join(
+        f"{row['ticker']}|{row['close_time']}|{row['probability_micro']}|{row['outcome']}"
+        for row in rows
+    ).encode()
     return {
         "source": BASE + "/markets",
         "series": SERIES,
@@ -157,7 +161,8 @@ def build_fixture(rows: list[dict], manifest: list[dict], spotcheck: dict) -> di
         "count": len(rows),
         "first_close": rows[0]["close_time"],
         "last_close": rows[-1]["close_time"],
-        "market_page_sha256": [record["sha256"] for record in manifest],
+        "source_pages": len(manifest),
+        "selection_sha256": hashlib.sha256(canonical_rows).hexdigest(),
         "last_trade_spotcheck": {
             "sample_count": spotcheck["sample_count"],
             "matches": spotcheck["matches"],
