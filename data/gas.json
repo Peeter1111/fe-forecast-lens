@@ -1,5 +1,6 @@
 {
   "engine": "eth-tester + PyEVM, one EVM transaction per forecast",
+  "eth_tester_version": "0.13.0b1",
   "py_evm_version": "0.12.1b1",
   "vm": "PragueVM",
   "forecast_lens_bytecode_sha256": "3a10453d36f2368b5a59453b26d2e9946b55cc035525e4495a82771539bda27d",

@@ -2,7 +2,7 @@
 
 **Pitch:** Exact, mergeable forecast calibration in Fe using six storage words instead of storing every forecast.
 
-**Measured headline:** 32,259 gas/record steady median versus 48,935 for a store-every-event control; real-data replay covers 6,113 settled Kalshi markets.
+**Headline:** 32,259 gas/record steady median versus 48,935 for a store-every-event control; real-data replay covers 6,113 settled Kalshi markets.
 
 ## The problem
 
@@ -17,6 +17,10 @@ Forecast Lens stores additive integer sufficient statistics. Any partition or me
 - `Ledger<R: ScoringRule>` accumulates exact numerators; no floating point or per-shard rounding.
 - Five reliability bins return count, mean quote, observed rate, and nominal-95% Wilson bounds.
 - The contract persists Brier plus those five bins in **six packed `u256` words**. Quartic stays in the pure library so it does not add another SSTORE per forecast.
+
+For the quartic loss, the expected-loss derivative is `12p(1-p)(p-q)`, so the true probability `q` is the unique interior minimum with the correct boundary minima. The formula is exact on the fixed-point grid and needs no logarithm table or approximation.
+
+The score word packs a 64-bit event count beside the Brier numerator; each bin word packs a 64-bit count, 64-bit positive count, and 128-bit probability sum. Those widths remain safe through `2^64 - 1` events and make the persistent update touch only the score word and one bin word.
 
 ## Fe highlight
 
@@ -54,7 +58,7 @@ The exact 6,113 price/outcome pairs compress to 11 frequency rows; the Fe test e
 
 ## Gas result
 
-`scripts/gas_bench.py` runs the compiled Fe bytecode in PyEVM 0.12.1b1 / PragueVM, one transaction per forecast. The control stores every raw event in a `StorageMap`.
+`scripts/gas_bench.py` runs the compiled Fe bytecode with eth-tester 0.13.0b1 and PyEVM 0.12.1b1 / PragueVM, one transaction per forecast. The control stores every raw event in a `StorageMap`.
 
 | Metric | Forecast Lens | Store every event |
 | --- | ---: | ---: |
@@ -74,11 +78,12 @@ Steady median recording gas is **34.1% lower**. Recording-only cumulative gas be
 - `src/tests.fe`, `src/kalshi_replay_tests.fe` — 10,000-case merge property plus 6,113-market contract replay.
 - `bench/naive/`, `scripts/`, `data/` — gas control, independent Fraction oracle, public-data fetch/replay, and frozen outputs.
 
-## Build and reproduce
+## Build and test
 
 Built with **`fe 26.5.0 (3dab95f)`**.
 
 ```sh
+fe --version
 fe fmt --check && fe test && fe build
 python3 scripts/oracle.py --check
 python3 scripts/replay.py
@@ -88,6 +93,18 @@ uv run --script scripts/gas_bench.py
 ```
 
 The Fe suite runs 10,000 seeded merge-order cases. `scripts/oracle.py` independently uses Python `Fraction` arithmetic for another 10,000 randomized partition/order cases.
+
+Python 3.11+ is enough for the oracle, replay, and fetch scripts. The gas benchmark uses `uv` to install its declared PyEVM dependencies in an isolated environment.
+
+## Demo
+
+The shortest reproducible demo uses the checked-in public-data fixture:
+
+```sh
+python3 scripts/replay.py
+```
+
+It prints the 6,113-market calibration table and the two exact integer scores. `uv run --script scripts/gas_bench.py` then reproduces the aggregate-versus-raw-storage gas table from the freshly built Fe bytecode.
 
 ## Limitations
 

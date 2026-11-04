@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run --script
 # /// script
 # requires-python = ">=3.11,<3.14"
-# dependencies = ["eth-tester>=0.13.0b1", "py-evm>=0.12.1b1", "eth-hash[pycryptodome]>=0.7.1", "eth-utils>=5.3.0"]
+# dependencies = ["eth-tester==0.13.0b1", "py-evm==0.12.1b1", "eth-hash[pycryptodome]==0.7.1", "eth-utils==5.3.0"]
 # ///
 """Measure transaction gas for Forecast Lens versus raw-event storage.
 
@@ -117,6 +117,7 @@ def main() -> None:
 
     result = {
         "engine": "eth-tester + PyEVM, one EVM transaction per forecast",
+        "eth_tester_version": importlib.metadata.version("eth-tester"),
         "py_evm_version": importlib.metadata.version("py-evm"),
         "vm": tester.backend.chain.get_vm().__class__.__name__,
         "forecast_lens_bytecode_sha256": hashlib.sha256(bytes.fromhex(AGG_BIN.read_text().strip())).hexdigest(),
