@@ -1,21 +1,25 @@
 use ingot::reliability::Bin
 use ingot::scoring::{Brier, Ledger, ScoringRule}
 use std::abi::sol
+use std::evm::keccak_words
 
 const COUNT_MASK: u256 = 18446744073709551615
 
 pub msg ForecastLensMsg {
-    #[selector = sol("record(uint256,bool)")]
-    Record { probability: u256, outcome: bool } -> u256,
+    #[selector = sol("record(uint256,uint256,bool)")]
+    Record { event_id: u256, probability: u256, outcome: bool } -> u256,
 
     #[selector = sol("scores()")]
     Scores -> (u256, u256),
 
     #[selector = sol("bin(uint256)")]
     BinView { index: u256 } -> (u256, u256, u256, u256, u256),
+
+    #[selector = sol("audit()")]
+    Audit -> (u256, u256),
 }
 
-/// Six storage words total: one packed Brier ledger plus five packed bins.
+/// Eight storage words: reporter, rolling hash, Brier ledger and five bins.
 /// The second proper rule stays in the pure generic library. Persisting it
 /// would add one SSTORE to every forecast without improving calibration.
 pub struct ForecastStore { score: u256, b0: u256, b1: u256, b2: u256, b3: u256, b4: u256 }
@@ -96,12 +100,28 @@ uses (store: ForecastStore)
     Bin::from_parts(count, probability_sum, positives).snapshot()
 }
 
-pub contract ForecastLens {
+pub contract ForecastLens uses (ctx: Ctx) {
+    reporter: Address,
+    mut chain: u256,
     mut store: ForecastStore,
 
+    init()
+    uses (ctx, mut reporter, mut chain)
+    {
+        reporter = ctx.caller()
+        chain = 0
+    }
+
     recv ForecastLensMsg {
-        Record { probability, outcome } -> u256 uses (mut store) {
-            record_store(probability, outcome)
+        Record { event_id, probability, outcome } -> u256
+        uses (ctx, reporter, mut store, mut chain)
+        {
+            assert!(ctx.caller() == reporter, "Only the reporter may record")
+            assert!(event_id > 0, "Event ID must be nonzero")
+            let count = record_store(probability, outcome)
+            let outcome_word: u256 = if outcome { 1 } else { 0 }
+            chain = keccak_words([chain, event_id, probability, outcome_word])
+            count
         }
 
         Scores -> (u256, u256) uses (store) {
@@ -112,6 +132,11 @@ pub contract ForecastLens {
         uses (store)
         {
             bin_view(index)
+        }
+
+        Audit -> (u256, u256) uses (store, chain) {
+            let (count, _) = score_parts(store.score)
+            (count, chain)
         }
     }
 }

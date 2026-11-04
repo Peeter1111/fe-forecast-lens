@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Fetch and freeze the Forecast Lens real-market calibration sample.
+"""Freeze one full day of KXBTC15M forecasts from five minutes before close.
 
-Selection is deliberately narrow and reproducible: settled KXBTC15M binary
-markets closing from 2026-09-01 00:00 UTC through 2026-11-04 10:00 UTC,
-with a YES/NO result, positive traded volume, and an interior final trade
-price. Kalshi's settled-market `last_price_dollars` is used as the final trade
-before close. A deterministic trade-tape spot check verifies that interpretation.
+Every eligible settled market in the fixed UTC window is considered, without
+filtering by quoted probability or its result. The last YES trade at or before
+close minus five minutes is used. Markets without that trade are counted and
+excluded. Anonymous public API responses are saved outside the source tree.
 """
 
 from __future__ import annotations
@@ -15,6 +14,7 @@ import collections
 import datetime as dt
 import hashlib
 import json
+import tempfile
 import time
 import urllib.parse
 import urllib.request
@@ -27,9 +27,11 @@ FE_FIXTURE = ROOT / "src" / "kalshi_fixture.fe"
 BASE = "https://api.elections.kalshi.com/trade-api/v2"
 UA = "forecast-lens-fe-contest/2026-11-04"
 SERIES = "KXBTC15M"
-START = dt.datetime(2026, 9, 1, tzinfo=dt.timezone.utc)
-END = dt.datetime(2026, 11, 4, 10, tzinfo=dt.timezone.utc)
+START = dt.datetime(2026, 11, 1, tzinfo=dt.timezone.utc)
+END = dt.datetime(2026, 11, 2, tzinfo=dt.timezone.utc)
 SCALE = 1_000_000
+LEAD_SECONDS = 300
+EVENT_STRIDE = (SCALE + 1) * 2
 
 
 def get_bytes(url: str) -> bytes:
@@ -38,12 +40,14 @@ def get_bytes(url: str) -> bytes:
         try:
             request = urllib.request.Request(url, headers={"User-Agent": UA})
             with urllib.request.urlopen(request, timeout=40) as response:
-                return response.read()
+                body = response.read()
+            time.sleep(0.35)
+            return body
         except Exception as exc:  # retry only network/public-API failures
             last = exc
             if attempt == 4:
                 raise
-            time.sleep(0.4 * (attempt + 1))
+            time.sleep(2 * (attempt + 1))
     raise RuntimeError(last)
 
 
@@ -94,126 +98,130 @@ def select(rows: list[dict]) -> list[dict]:
             continue
         if Decimal(str(market.get("volume_fp", "0"))) <= 0:
             continue
-        price = Decimal(str(market.get("last_price_dollars", "0")))
-        if not Decimal(0) < price < Decimal(1):
+        close = dt.datetime.fromisoformat(market["close_time"].replace("Z", "+00:00"))
+        if not START <= close < END:
             continue
-        micro = int(price * SCALE)
-        if Decimal(micro) / SCALE != price:
-            raise ValueError(f"price not exact at 1e-6 scale: {market['ticker']} {price}")
         selected.append(
             {
                 "ticker": market["ticker"],
                 "close_time": market["close_time"],
-                "probability_micro": micro,
+                "event_id": int(close.timestamp()),
                 "outcome": 1 if market["result"] == "yes" else 0,
             }
         )
     selected.sort(key=lambda row: (row["close_time"], row["ticker"]))
+    if len({row["event_id"] for row in selected}) != len(selected):
+        raise ValueError("close timestamps are not unique in this one-series sample")
     return selected
 
 
-def spotcheck_trades(rows: list[dict], raw_dir: Path, count: int = 24) -> dict:
-    if len(rows) < count:
-        indices = list(range(len(rows)))
-    else:
-        indices = [round(i * (len(rows) - 1) / (count - 1)) for i in range(count)]
-    matches = 0
-    checked = []
-    trade_dir = raw_dir / "trade-checks"
+def preclose_quotes(rows: list[dict], raw_dir: Path) -> tuple[list[dict], dict, list[dict]]:
+    selected = []
+    skipped = collections.Counter()
+    manifest = []
+    trade_dir = raw_dir / "trades"
     trade_dir.mkdir(parents=True, exist_ok=True)
-    for index in indices:
-        row = rows[index]
+    for row in rows:
+        cutoff = row["event_id"] - LEAD_SECONDS
         url = BASE + "/markets/trades?" + urllib.parse.urlencode(
-            {"ticker": row["ticker"], "limit": 1}
+            {"ticker": row["ticker"], "limit": 1, "max_ts": cutoff}
         )
         body = get_bytes(url)
-        (trade_dir / f"{index:05d}.json").write_bytes(body)
-        trades = json.loads(body).get("trades", [])
-        ok = False
-        trade_time = None
-        if trades:
-            trade = trades[0]
-            micro = int(Decimal(trade["yes_price_dollars"]) * SCALE)
-            trade_time = trade.get("created_time")
-            ok = micro == row["probability_micro"] and trade_time <= row["close_time"]
-        matches += int(ok)
-        checked.append(
-            {"index": index, "ticker": row["ticker"], "trade_time": trade_time, "match": ok}
+        path = trade_dir / (row["ticker"] + ".json")
+        path.write_bytes(body)
+        manifest.append(
+            {"path": "trades/" + path.name, "url": url, "sha256": hashlib.sha256(body).hexdigest()}
         )
-    return {"sample_count": len(indices), "matches": matches, "checks": checked}
+        trades = json.loads(body).get("trades", [])
+        if not trades:
+            skipped["no_trade_before_cutoff"] += 1
+            continue
+        trade = trades[0]
+        trade_time = dt.datetime.fromisoformat(trade["created_time"].replace("Z", "+00:00"))
+        if trade_time.timestamp() > cutoff:
+            raise ValueError(f"API returned trade after cutoff: {row['ticker']}")
+        price = Decimal(str(trade["yes_price_dollars"]))
+        micro = int(price * SCALE)
+        if not Decimal(0) <= price <= Decimal(1) or Decimal(micro) / SCALE != price:
+            skipped["invalid_quote"] += 1
+            continue
+        selected.append({**row, "probability_micro": micro, "trade_time": trade["created_time"]})
+    return selected, dict(skipped), manifest
 
 
-def build_fixture(rows: list[dict], manifest: list[dict], spotcheck: dict) -> dict:
+def build_fixture(rows: list[dict], eligible: int, skipped: dict, manifest: list[dict]) -> dict:
     encoded = [row["probability_micro"] * 2 + row["outcome"] for row in rows]
     frequencies = sorted(collections.Counter(encoded).items())
+    events = [row["event_id"] * EVENT_STRIDE + code for row, code in zip(rows, encoded)]
     canonical_rows = "\n".join(
-        f"{row['ticker']}|{row['close_time']}|{row['probability_micro']}|{row['outcome']}"
+        f"{row['ticker']}|{row['event_id']}|{row['trade_time']}|{row['probability_micro']}|{row['outcome']}"
         for row in rows
     ).encode()
     return {
-        "source": BASE + "/markets",
+        "source": BASE,
         "series": SERIES,
-        "window": {"min_close": START.isoformat(), "max_close": END.isoformat()},
-        "selection": (
-            "settled binary markets; result yes/no; positive volume; 0 < last_price_dollars < 1; "
-            "probability is exact final YES last_price_dollars on the 1e6 scale"
-        ),
+        "window": {"min_close_inclusive": START.isoformat(), "max_close_exclusive": END.isoformat()},
+        "selection": "settled binary YES/NO positive-volume markets; last YES trade at least 300 seconds before close",
+        "eligible": eligible,
+        "skipped": skipped,
+        "lead_seconds": LEAD_SECONDS,
         "count": len(rows),
         "first_close": rows[0]["close_time"],
         "last_close": rows[-1]["close_time"],
-        "source_pages": len(manifest),
+        "raw_responses": len(manifest),
         "selection_sha256": hashlib.sha256(canonical_rows).hexdigest(),
-        "last_trade_spotcheck": {
-            "sample_count": spotcheck["sample_count"],
-            "matches": spotcheck["matches"],
-        },
         "encoding": "[encoded_event,count], encoded_event = probability_micro * 2 + outcome_yes_bit",
+        "event_encoding": "close_unix_seconds * 2000002 + encoded_event; sorted chronologically",
         "frequencies": frequencies,
+        "events": events,
     }
 
 
 def fe_fixture(fixture: dict) -> str:
     frequencies = fixture["frequencies"]
     codes = "\n".join(f"    {code}," for code, _ in frequencies)
-    counts = ", ".join(str(count) for _, count in frequencies)
+    events = "\n".join(f"    {code}," for code in fixture["events"])
+    counts = "\n".join(f"    {count}," for _, count in frequencies)
     return (
         "// Generated by scripts/fetch_kalshi.py. Do not edit by hand.\n"
         f"pub const KALSHI_EVENT_COUNT: u256 = {fixture['count']}\n"
         f"pub const KALSHI_UNIQUE_COUNT: usize = {len(frequencies)}\n"
         f"pub const KALSHI_CODES: [u256; {len(frequencies)}] = [\n{codes}\n]\n"
-        f"pub const KALSHI_COUNTS: [u256; {len(frequencies)}] = [{counts}]\n"
+        f"pub const KALSHI_COUNTS: [u256; {len(frequencies)}] = [\n{counts}\n]\n"
+        f"pub const KALSHI_EVENTS: [u256; {fixture['count']}] = [\n{events}\n]\n"
     )
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--check", action="store_true")
-    parser.add_argument("--raw-dir", type=Path, default=ROOT / ".cache" / "kalshi")
+    parser.add_argument(
+        "--raw-dir", type=Path, default=Path(tempfile.gettempdir()) / "forecast-lens-raw"
+    )
     args = parser.parse_args()
 
     rows, manifest = paged_markets(args.raw_dir)
     selected = select(rows)
-    if len(selected) < 5_000:
-        raise SystemExit(f"selection has only {len(selected)} markets; need >= 5000")
-    spotcheck = spotcheck_trades(selected, args.raw_dir)
-    if spotcheck["matches"] != spotcheck["sample_count"]:
-        raise SystemExit("market last_price disagrees with latest-trade spot check")
-    fixture = build_fixture(selected, manifest, spotcheck)
+    quoted, skipped, trade_manifest = preclose_quotes(selected, args.raw_dir)
+    if not quoted:
+        raise SystemExit("no preclose trades in fixed window")
+    fixture = build_fixture(quoted, len(selected), skipped, manifest + trade_manifest)
     body = json.dumps(fixture, separators=(",", ":"), sort_keys=True) + "\n"
     fe_body = fe_fixture(fixture)
-    (args.raw_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
-    (args.raw_dir / "spotcheck.json").write_text(json.dumps(spotcheck, indent=2) + "\n")
+    (args.raw_dir / "manifest.json").write_text(
+        json.dumps(manifest + trade_manifest, indent=2) + "\n"
+    )
 
     if args.check:
         if not FIXTURE.exists() or FIXTURE.read_text() != body:
             raise SystemExit("data/kalshi_btc15m.json is stale")
         if not FE_FIXTURE.exists() or FE_FIXTURE.read_text() != fe_body:
             raise SystemExit("src/kalshi_fixture.fe is stale")
-        print(f"fixture matches: {len(selected)} markets; {spotcheck['matches']}/{spotcheck['sample_count']} trade checks")
+        print(f"fixture matches: {len(quoted)}/{len(selected)} markets, skipped {skipped}")
     else:
         FIXTURE.write_text(body)
         FE_FIXTURE.write_text(fe_body)
-        print(f"wrote {len(selected)} markets; {spotcheck['matches']}/{spotcheck['sample_count']} latest-trade checks matched")
+        print(f"wrote {len(quoted)}/{len(selected)} preclose quotes; skipped {skipped}")
 
 
 if __name__ == "__main__":

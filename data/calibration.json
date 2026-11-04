@@ -1,10 +1,10 @@
 {
   "source_fixture": "kalshi_btc15m.json",
-  "count": 6113,
-  "brier_micro": 1,
-  "quartic_micro": 0,
-  "brier_sum": 7136000000,
-  "quartic_sum": 87946176000000000000,
+  "count": 96,
+  "brier_micro": 105328,
+  "quartic_micro": 123851,
+  "brier_sum": 10111464000000,
+  "quartic_sum": 11889738265768000000000000,
   "bins": [
     {
       "bin": 0,
@@ -12,13 +12,13 @@
         0,
         200000
       ],
-      "count": 3082,
-      "mean_quote_micro": 1016,
-      "yes_rate_micro": 0,
-      "wilson_lower_micro": 0,
-      "wilson_upper_micro": 1245,
-      "positives": 0,
-      "probability_sum": 3130000
+      "count": 29,
+      "mean_quote_micro": 76034,
+      "yes_rate_micro": 34483,
+      "wilson_lower_micro": 6113,
+      "wilson_upper_micro": 171759,
+      "positives": 1,
+      "probability_sum": 2205000
     },
     {
       "bin": 1,
@@ -26,13 +26,13 @@
         200000,
         400000
       ],
-      "count": 0,
-      "mean_quote_micro": 0,
-      "yes_rate_micro": 0,
-      "wilson_lower_micro": 0,
-      "wilson_upper_micro": 1000000,
-      "positives": 0,
-      "probability_sum": 0
+      "count": 19,
+      "mean_quote_micro": 294737,
+      "yes_rate_micro": 368421,
+      "wilson_lower_micro": 191492,
+      "wilson_upper_micro": 589609,
+      "positives": 7,
+      "probability_sum": 5600000
     },
     {
       "bin": 2,
@@ -40,13 +40,13 @@
         400000,
         600000
       ],
-      "count": 0,
-      "mean_quote_micro": 0,
-      "yes_rate_micro": 0,
-      "wilson_lower_micro": 0,
-      "wilson_upper_micro": 1000000,
-      "positives": 0,
-      "probability_sum": 0
+      "count": 3,
+      "mean_quote_micro": 476667,
+      "yes_rate_micro": 666667,
+      "wilson_lower_micro": 207654,
+      "wilson_upper_micro": 938510,
+      "positives": 2,
+      "probability_sum": 1430000
     },
     {
       "bin": 3,
@@ -54,13 +54,13 @@
         600000,
         800000
       ],
-      "count": 0,
-      "mean_quote_micro": 0,
-      "yes_rate_micro": 0,
-      "wilson_lower_micro": 0,
-      "wilson_upper_micro": 1000000,
-      "positives": 0,
-      "probability_sum": 0
+      "count": 10,
+      "mean_quote_micro": 679000,
+      "yes_rate_micro": 700000,
+      "wilson_lower_micro": 396773,
+      "wilson_upper_micro": 892211,
+      "positives": 7,
+      "probability_sum": 6790000
     },
     {
       "bin": 4,
@@ -68,13 +68,13 @@
         800000,
         1000000
       ],
-      "count": 3031,
-      "mean_quote_micro": 998990,
-      "yes_rate_micro": 1000000,
-      "wilson_lower_micro": 998734,
-      "wilson_upper_micro": 1000000,
-      "positives": 3031,
-      "probability_sum": 3027938000
+      "count": 35,
+      "mean_quote_micro": 922086,
+      "yes_rate_micro": 942857,
+      "wilson_lower_micro": 813926,
+      "wilson_upper_micro": 984188,
+      "positives": 33,
+      "probability_sum": 32273000
     }
   ]
 }

@@ -1,5 +1,6 @@
 use ingot::{Brier, ForecastLens, ForecastLensMsg, ForecastSummary, Ledger, Quartic}
 use std::evm::Evm
+use std::evm::keccak_words
 
 fn single(_ probability: u256, _ outcome: bool) -> ForecastSummary {
     var summary = ForecastSummary::empty()
@@ -97,14 +98,14 @@ fn contract_message_group_records_and_reads() uses (evm: mut Evm) {
             addr: lens,
             gas: 3000000,
             value: Wei::zero(),
-            message: ForecastLensMsg::Record { probability: 500000, outcome: true },
+            message: ForecastLensMsg::Record { event_id: 1, probability: 500000, outcome: true },
         )
     let n2: u256 = evm
         .call(
             addr: lens,
             gas: 3000000,
             value: Wei::zero(),
-            message: ForecastLensMsg::Record { probability: 500000, outcome: false },
+            message: ForecastLensMsg::Record { event_id: 2, probability: 500000, outcome: false },
         )
     assert!(n1 == 1 && n2 == 2)
 
@@ -129,4 +130,17 @@ fn contract_message_group_records_and_reads() uses (evm: mut Evm) {
     assert!(quoted == 500000)
     assert!(observed == 500000)
     assert!(lower < observed && upper > observed)
+
+    let (audit_count, hash): (u256, u256) = evm
+        .call(
+            addr: lens,
+            gas: 2000000,
+            value: Wei::zero(),
+            message: ForecastLensMsg::Audit {},
+        )
+    let h1 = keccak_words([0, 1, 500000, 1])
+    let h2 = keccak_words([h1, 2, 500000, 0])
+    let wrong = keccak_words([h1, 2, 500001, 0])
+    assert!(audit_count == 2 && hash == h2)
+    assert!(hash != wrong)
 }
