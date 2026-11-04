@@ -3,8 +3,8 @@
   "eth_tester_version": "0.13.0b1",
   "py_evm_version": "0.12.1b1",
   "vm": "PragueVM",
-  "forecast_lens_bytecode_sha256": "3a10453d36f2368b5a59453b26d2e9946b55cc035525e4495a82771539bda27d",
-  "naive_bytecode_sha256": "3fd1777807777092b824377ad49b453fbf53fc87d19befee653bdc64606d6a1c",
+  "forecast_lens_bytecode_sha256": "6f02dc61fea3f8b5cd8bca2857a8b38c7a4b298867cbc61f06ca886a46146dba",
+  "naive_bytecode_sha256": "e4e6a1c257ab1deddf59ba0d895c21d84f80fa16d4c9f4ec8ff6739110b5eae8",
   "records": 100,
   "pattern": [
     [
@@ -49,28 +49,28 @@
     ]
   ],
   "aggregate": {
-    "deploy_gas": 350251,
-    "first_record_gas": 66366,
-    "steady_record_gas_median_last_50": 32259,
-    "record_gas_total_100": 3328810,
-    "record_gas_mean_100": 33288.1
+    "deploy_gas": 435382,
+    "first_record_gas": 88781,
+    "steady_record_gas_median_last_50": 37578.0,
+    "record_gas_total_100": 3877960,
+    "record_gas_mean_100": 38779.6
   },
   "naive": {
-    "deploy_gas": 93136,
-    "first_record_gas": 65971,
-    "steady_record_gas_median_last_50": 48935,
-    "record_gas_total_100": 4907880,
-    "record_gas_mean_100": 49078.8
+    "deploy_gas": 98544,
+    "first_record_gas": 88309,
+    "steady_record_gas_median_last_50": 71247.0,
+    "record_gas_total_100": 7141680,
+    "record_gas_mean_100": 71416.8
   },
-  "recording_only_break_even_event": 6,
+  "recording_only_break_even_event": 2,
   "recording_only_break_even_cumulative_gas": {
-    "aggregate": 296191,
-    "naive": 310542
+    "aggregate": 143400,
+    "naive": 159530
   },
-  "lifecycle_break_even_event": 21,
+  "lifecycle_break_even_event": 14,
   "lifecycle_break_even_cumulative_gas": {
-    "aggregate": 1130259,
-    "naive": 1137263
+    "aggregate": 1081208,
+    "naive": 1113078
   },
-  "steady_median_reduction_fraction": 0.34077858383570037
+  "steady_median_reduction_fraction": 0.472567265990147
 }

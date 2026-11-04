@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import hashlib
 import importlib.metadata
+from statistics import median
 from pathlib import Path
 
 from eth_tester import EthereumTester
@@ -38,19 +39,19 @@ def deploy(tester: EthereumTester, sender: str, path: Path) -> tuple[str, int]:
     return receipt["contract_address"], receipt["gas_used"]
 
 
-def calldata(probability: int, outcome: int) -> str:
-    selector = keccak(text="record(uint256,bool)")[:4]
-    body = probability.to_bytes(32, "big") + outcome.to_bytes(32, "big")
+def calldata(event_id: int, probability: int, outcome: int) -> str:
+    selector = keccak(text="record(uint256,uint256,bool)")[:4]
+    body = b"".join(word.to_bytes(32, "big") for word in (event_id, probability, outcome))
     return "0x" + (selector + body).hex()
 
 
-def send_record(tester: EthereumTester, sender: str, address: str, probability: int, outcome: int) -> int:
+def send_record(tester: EthereumTester, sender: str, address: str, event_id: int, probability: int, outcome: int) -> int:
     tx = tester.send_transaction(
         {
             "from": sender,
             "to": address,
             "gas": 3_000_000,
-            "data": calldata(probability, outcome),
+            "data": calldata(event_id, probability, outcome),
         }
     )
     receipt = tester.get_transaction_receipt(tx)
@@ -67,6 +68,14 @@ def main() -> None:
     sender = tester.get_accounts()[0]
     aggregate, aggregate_deploy = deploy(tester, sender, AGG_BIN)
     naive, naive_deploy = deploy(tester, sender, NAIVE_BIN)
+
+    # A different account must not be able to affect the calibration state.
+    stranger = tester.get_accounts()[1]
+    denied_tx = tester.send_transaction(
+        {"from": stranger, "to": aggregate, "gas": 3000000, "data": calldata(1, 500000, 1)}
+    )
+    if tester.get_transaction_receipt(denied_tx)["status"] != 0:
+        raise AssertionError("unauthorized forecast was accepted")
 
     # Fixed 100-record mix hits every reliability bin and both outcomes.
     pattern = [
@@ -89,8 +98,8 @@ def main() -> None:
     break_even_totals = None
     for i in range(100):
         probability, outcome = pattern[i % len(pattern)]
-        a = send_record(tester, sender, aggregate, probability, outcome)
-        n = send_record(tester, sender, naive, probability, outcome)
+        a = send_record(tester, sender, aggregate, i + 1, probability, outcome)
+        n = send_record(tester, sender, naive, i + 1, probability, outcome)
         aggregate_gas.append(a)
         naive_gas.append(n)
         cumulative_aggregate += a
@@ -127,14 +136,14 @@ def main() -> None:
         "aggregate": {
             "deploy_gas": aggregate_deploy,
             "first_record_gas": aggregate_gas[0],
-            "steady_record_gas_median_last_50": sorted(aggregate_gas[-50:])[25],
+            "steady_record_gas_median_last_50": median(aggregate_gas[-50:]),
             "record_gas_total_100": sum(aggregate_gas),
             "record_gas_mean_100": sum(aggregate_gas) / len(aggregate_gas),
         },
         "naive": {
             "deploy_gas": naive_deploy,
             "first_record_gas": naive_gas[0],
-            "steady_record_gas_median_last_50": sorted(naive_gas[-50:])[25],
+            "steady_record_gas_median_last_50": median(naive_gas[-50:]),
             "record_gas_total_100": sum(naive_gas),
             "record_gas_mean_100": sum(naive_gas) / len(naive_gas),
         },
@@ -143,7 +152,7 @@ def main() -> None:
         "lifecycle_break_even_event": lifecycle_break_even,
         "lifecycle_break_even_cumulative_gas": lifecycle_totals,
         "steady_median_reduction_fraction": 1
-        - sorted(aggregate_gas[-50:])[25] / sorted(naive_gas[-50:])[25],
+        - median(aggregate_gas[-50:]) / median(naive_gas[-50:]),
     }
     OUT.write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result, indent=2))
