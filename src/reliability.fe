@@ -1,0 +1,191 @@
+use ingot::scoring::SCALE
+
+const MAX_EVENTS: u256 = 18446744073709551615
+
+fn integer_sqrt(value: u256) -> u256 {
+    if value == 0 { return 0 }
+    var estimate = value
+    var next = (estimate + 1) / 2
+    while next < estimate {
+        estimate = next
+        next = (estimate + value / estimate) / 2
+    }
+    estimate
+}
+
+/// Wilson score bound for a Bernoulli rate at z=1.96 (nominal 95%).
+/// Lower bounds round down and upper bounds round up on the micro scale.
+fn wilson_bound(positives: u256, count: u256, upper: bool) -> u256 {
+    assert!(positives <= count)
+    assert!(count <= MAX_EVENTS)
+    if count == 0 {
+        return if upper { SCALE } else { 0 }
+    }
+
+    // z^2 = 3.8416 exactly as 38416 / 10000.
+    let q: u256 = 10000
+    let z2: u256 = 38416
+    let variance = 4 * positives * (count - positives) * q
+    let radicand = z2 * (z2 * count + variance) * SCALE * SCALE / count
+    // A one-micro-unit ceiling keeps integer discretization conservative.
+    let radius = integer_sqrt(value: radicand) + 1
+    let center = (2 * positives * q + z2) * SCALE
+    let denominator = 2 * (count * q + z2)
+
+    if upper {
+        let bound = (center + radius + denominator - 1) / denominator
+        if bound > SCALE { SCALE } else { bound }
+    } else if center <= radius {
+        0
+    } else {
+        (center - radius) / denominator
+    }
+}
+
+pub struct Bin { count: u256, probability_sum: u256, positives: u256 }
+
+impl Bin {
+    pub fn empty() -> Bin {
+        Bin { count: 0, probability_sum: 0, positives: 0 }
+    }
+
+    pub fn from_parts(_ count: u256, _ probability_sum: u256, _ positives: u256) -> Bin {
+        assert!(count <= MAX_EVENTS)
+        assert!(positives <= count)
+        assert!(probability_sum <= count * SCALE)
+        Bin { count, probability_sum, positives }
+    }
+
+    pub fn record(mut self, _ probability: u256, _ outcome: bool) {
+        assert!(probability <= SCALE)
+        assert!(self.count < MAX_EVENTS)
+        self.count += 1
+        self.probability_sum += probability
+        if outcome {
+            self.positives += 1
+        }
+    }
+
+    pub fn merged(self, _ other: own Bin) -> Bin {
+        assert!(self.count <= MAX_EVENTS - other.count)
+        Bin {
+            count: self.count + other.count,
+            probability_sum: self.probability_sum + other.probability_sum,
+            positives: self.positives + other.positives,
+        }
+    }
+
+    pub fn parts(self) -> (u256, u256, u256) {
+        (self.count, self.probability_sum, self.positives)
+    }
+
+    /// Five values needed for one reliability point:
+    /// count, mean quote, observed rate, Wilson lower, Wilson upper.
+    pub fn snapshot(self) -> (u256, u256, u256, u256, u256) {
+        if self.count == 0 {
+            let zero: u256 = 0
+            return (zero, zero, zero, zero, SCALE)
+        }
+        let mean = (self.probability_sum + self.count / 2) / self.count
+        let rate = (self.positives * SCALE + self.count / 2) / self.count
+        (
+            self.count,
+            mean,
+            rate,
+            wilson_bound(
+                positives: self.positives,
+                count: self.count,
+                upper: false,
+            ),
+            wilson_bound(positives: self.positives, count: self.count, upper: true),
+        )
+    }
+}
+
+/// Five equal-width bins: [0,.2), [.2,.4), [.4,.6), [.6,.8), [.8,1].
+pub struct Reliability { b0: Bin, b1: Bin, b2: Bin, b3: Bin, b4: Bin }
+
+impl Reliability {
+    pub fn empty() -> Reliability {
+        Reliability {
+            b0: Bin::empty(),
+            b1: Bin::empty(),
+            b2: Bin::empty(),
+            b3: Bin::empty(),
+            b4: Bin::empty(),
+        }
+    }
+
+    pub fn from_bins(
+        _ b0: own Bin,
+        _ b1: own Bin,
+        _ b2: own Bin,
+        _ b3: own Bin,
+        _ b4: own Bin,
+    ) -> Reliability {
+        Reliability { b0, b1, b2, b3, b4 }
+    }
+
+    pub fn record(mut self, _ probability: u256, _ outcome: bool) {
+        assert!(probability <= SCALE)
+        if probability < 200000 {
+            self.b0.record(probability, outcome)
+        } else if probability < 400000 {
+            self.b1.record(probability, outcome)
+        } else if probability < 600000 {
+            self.b2.record(probability, outcome)
+        } else if probability < 800000 {
+            self.b3.record(probability, outcome)
+        } else {
+            self.b4.record(probability, outcome)
+        }
+    }
+
+    pub fn merged(self, _ other: own Reliability) -> Reliability {
+        Reliability {
+            b0: self.b0.merged(other.b0),
+            b1: self.b1.merged(other.b1),
+            b2: self.b2.merged(other.b2),
+            b3: self.b3.merged(other.b3),
+            b4: self.b4.merged(other.b4),
+        }
+    }
+
+    pub fn count(self) -> u256 {
+        self.b0.parts().0
+            + self.b1.parts().0
+            + self.b2.parts().0
+            + self.b3.parts().0
+            + self.b4.parts().0
+    }
+
+    pub fn bin_parts(self, _ index: u256) -> (u256, u256, u256) {
+        assert!(index < 5)
+        if index == 0 {
+            self.b0.parts()
+        } else if index == 1 {
+            self.b1.parts()
+        } else if index == 2 {
+            self.b2.parts()
+        } else if index == 3 {
+            self.b3.parts()
+        } else {
+            self.b4.parts()
+        }
+    }
+
+    pub fn snapshot(self, _ index: u256) -> (u256, u256, u256, u256, u256) {
+        assert!(index < 5)
+        if index == 0 {
+            self.b0.snapshot()
+        } else if index == 1 {
+            self.b1.snapshot()
+        } else if index == 2 {
+            self.b2.snapshot()
+        } else if index == 3 {
+            self.b3.snapshot()
+        } else {
+            self.b4.snapshot()
+        }
+    }
+}

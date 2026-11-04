@@ -1,0 +1,137 @@
+use std::abi::sol
+use ingot::reliability::Bin
+use ingot::scoring::{Brier, Quartic, ScoringRule}
+use ingot::summary::ForecastSummary
+
+pub msg ForecastLensMsg {
+    #[selector = sol("record(uint256,bool)")]
+    Record { probability: u256, outcome: bool } -> u256,
+
+    #[selector = sol("scores()")]
+    Scores -> (u256, u256, u256),
+
+    #[selector = sol("bin(uint256)")]
+    BinView { index: u256 } -> (u256, u256, u256, u256, u256),
+}
+
+/// Persistent sufficient statistics. No raw event is retained.
+pub struct ForecastStore {
+    count: u256,
+    brier_sum: u256,
+    quartic_sum: u256,
+    b0_count: u256,
+    b0_probability_sum: u256,
+    b0_positives: u256,
+    b1_count: u256,
+    b1_probability_sum: u256,
+    b1_positives: u256,
+    b2_count: u256,
+    b2_probability_sum: u256,
+    b2_positives: u256,
+    b3_count: u256,
+    b3_probability_sum: u256,
+    b3_positives: u256,
+    b4_count: u256,
+    b4_probability_sum: u256,
+    b4_positives: u256,
+}
+
+fn load_summary() -> ForecastSummary uses (store: ForecastStore) {
+    ForecastSummary::from_parts(
+        store.count,
+        store.brier_sum,
+        store.quartic_sum,
+        Bin::from_parts(
+            store.b0_count,
+            store.b0_probability_sum,
+            store.b0_positives,
+        ),
+        Bin::from_parts(
+            store.b1_count,
+            store.b1_probability_sum,
+            store.b1_positives,
+        ),
+        Bin::from_parts(
+            store.b2_count,
+            store.b2_probability_sum,
+            store.b2_positives,
+        ),
+        Bin::from_parts(
+            store.b3_count,
+            store.b3_probability_sum,
+            store.b3_positives,
+        ),
+        Bin::from_parts(
+            store.b4_count,
+            store.b4_probability_sum,
+            store.b4_positives,
+        ),
+    )
+}
+
+fn record_store(_ probability: u256, _ outcome: bool) -> u256
+uses (store: mut ForecastStore)
+{
+    assert!(probability <= 1000000)
+    assert!(store.count < 18446744073709551615)
+
+    // The only stateful part is addition of the pure event statistics.
+    store.count += 1
+    store.brier_sum += Brier::loss_numerator(probability, outcome)
+    store.quartic_sum += Quartic::loss_numerator(probability, outcome)
+
+    if probability < 200000 {
+        store.b0_count += 1
+        store.b0_probability_sum += probability
+        if outcome {
+            store.b0_positives += 1
+        }
+    } else if probability < 400000 {
+        store.b1_count += 1
+        store.b1_probability_sum += probability
+        if outcome {
+            store.b1_positives += 1
+        }
+    } else if probability < 600000 {
+        store.b2_count += 1
+        store.b2_probability_sum += probability
+        if outcome {
+            store.b2_positives += 1
+        }
+    } else if probability < 800000 {
+        store.b3_count += 1
+        store.b3_probability_sum += probability
+        if outcome {
+            store.b3_positives += 1
+        }
+    } else {
+        store.b4_count += 1
+        store.b4_probability_sum += probability
+        if outcome {
+            store.b4_positives += 1
+        }
+    }
+    store.count
+}
+
+pub contract ForecastLens {
+    mut store: ForecastStore,
+
+    recv ForecastLensMsg {
+        Record { probability, outcome } -> u256 uses (mut store) {
+            record_store(probability, outcome)
+        }
+
+        Scores -> (u256, u256, u256) uses (store) {
+            let summary = load_summary()
+            let (brier, quartic) = summary.scores()
+            (summary.count(), brier, quartic)
+        }
+
+        BinView { index } -> (u256, u256, u256, u256, u256)
+        uses (store)
+        {
+            load_summary().bin(index)
+        }
+    }
+}

@@ -1,0 +1,133 @@
+use ingot::{Brier, ForecastLens, ForecastLensMsg, ForecastSummary, Ledger, Quartic}
+use std::evm::Evm
+
+fn single(_ probability: u256, _ outcome: bool) -> ForecastSummary {
+    var summary = ForecastSummary::empty()
+    summary.record(probability, outcome)
+    summary
+}
+
+fn assert_same(_ left: ForecastSummary, _ right: ForecastSummary) {
+    assert!(left.count() == right.count())
+    assert!(left.score_sums() == right.score_sums())
+    var bin: u256 = 0
+    while bin < 5 {
+        assert!(left.bin_parts(bin) == right.bin_parts(bin))
+        bin += 1
+    }
+}
+
+#[test]
+fn exact_scoring_rules_have_known_values() {
+    var brier = Ledger::empty(Brier {})
+    var quartic = Ledger::empty(Quartic {})
+    brier.record(500000, true)
+    quartic.record(500000, true)
+    assert!(brier.score_micro() == 250000)
+    assert!(quartic.score_micro() == 312500)
+
+    var perfect_brier = Ledger::empty(Brier {})
+    var perfect_quartic = Ledger::empty(Quartic {})
+    perfect_brier.record(1000000, true)
+    perfect_quartic.record(0, false)
+    assert!(perfect_brier.score_micro() == 0)
+    assert!(perfect_quartic.score_micro() == 0)
+}
+
+#[test]
+fn reliability_snapshot_keeps_only_useful_fields() {
+    var summary = ForecastSummary::empty()
+    summary.record(100000, true)
+    summary.record(100000, false)
+    let (count, quoted, observed, lower, upper) = summary.bin(0)
+    assert!(count == 2)
+    assert!(quoted == 100000)
+    assert!(observed == 500000)
+    assert!(lower < observed)
+    assert!(upper > observed)
+    assert!(lower < upper)
+}
+
+#[test]
+fn merge_is_associative_and_commutative_for_seeded_10000_cases() {
+    var state: u256 = 20261104
+    var case: u256 = 0
+    while case < 10000 {
+        state = (state * 1664525 + 1013904223) % 4294967296
+        let p0 = state % 1000001
+        state = (state * 1664525 + 1013904223) % 4294967296
+        let p1 = state % 1000001
+        state = (state * 1664525 + 1013904223) % 4294967296
+        let p2 = state % 1000001
+        state = (state * 1664525 + 1013904223) % 4294967296
+        let o0 = state % 2 == 1
+        state = (state * 1664525 + 1013904223) % 4294967296
+        let o1 = state % 2 == 1
+        state = (state * 1664525 + 1013904223) % 4294967296
+        let o2 = state % 2 == 1
+
+        var direct = ForecastSummary::empty()
+        direct.record(p0, o0)
+        direct.record(p1, o1)
+        direct.record(p2, o2)
+
+        let a = single(p0, o0)
+        let b = single(p1, o1)
+        let c = single(p2, o2)
+        let ab = a.merged(b)
+        let left = ab.merged(c)
+
+        let a2 = single(p0, o0)
+        let b2 = single(p1, o1)
+        let c2 = single(p2, o2)
+        let ba = b2.merged(a2)
+        let right = c2.merged(ba)
+
+        assert_same(direct, left)
+        assert_same(direct, right)
+        case += 1
+    }
+}
+
+#[test]
+fn contract_message_group_records_and_reads() uses (evm: mut Evm) {
+    let lens = evm.create2<ForecastLens>(value: Wei::zero(), args: (), salt: 1)
+    let n1: u256 = evm
+        .call(
+            addr: lens,
+            gas: 3000000,
+            value: Wei::zero(),
+            message: ForecastLensMsg::Record { probability: 500000, outcome: true },
+        )
+    let n2: u256 = evm
+        .call(
+            addr: lens,
+            gas: 3000000,
+            value: Wei::zero(),
+            message: ForecastLensMsg::Record { probability: 500000, outcome: false },
+        )
+    assert!(n1 == 1 && n2 == 2)
+
+    let (count, brier, quartic): (u256, u256, u256) = evm
+        .call(
+            addr: lens,
+            gas: 2000000,
+            value: Wei::zero(),
+            message: ForecastLensMsg::Scores {},
+        )
+    assert!(count == 2)
+    assert!(brier == 250000)
+    assert!(quartic == 312500)
+
+    let (bin_count, quoted, observed, lower, upper): (u256, u256, u256, u256, u256) = evm
+        .call(
+            addr: lens,
+            gas: 2000000,
+            value: Wei::zero(),
+            message: ForecastLensMsg::BinView { index: 2 },
+        )
+    assert!(bin_count == 2)
+    assert!(quoted == 500000)
+    assert!(observed == 500000)
+    assert!(lower < observed && upper > observed)
+}

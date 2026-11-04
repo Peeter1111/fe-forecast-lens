@@ -1,0 +1,72 @@
+use ingot::reliability::{Bin, Reliability}
+use ingot::scoring::{Brier, Ledger, Quartic}
+
+/// Complete pure accumulator. It contains no storage handles and has no effects.
+pub struct ForecastSummary {
+    brier: Ledger<Brier>,
+    quartic: Ledger<Quartic>,
+    reliability: Reliability,
+}
+
+impl ForecastSummary {
+    pub fn empty() -> ForecastSummary {
+        ForecastSummary {
+            brier: Ledger::empty(Brier {}),
+            quartic: Ledger::empty(Quartic {}),
+            reliability: Reliability::empty(),
+        }
+    }
+
+    pub fn from_parts(
+        _ count: u256,
+        _ brier_sum: u256,
+        _ quartic_sum: u256,
+        _ b0: own Bin,
+        _ b1: own Bin,
+        _ b2: own Bin,
+        _ b3: own Bin,
+        _ b4: own Bin,
+    ) -> ForecastSummary {
+        let reliability = Reliability::from_bins(b0, b1, b2, b3, b4)
+        assert!(reliability.count() == count)
+        ForecastSummary {
+            brier: Ledger::from_parts(Brier {}, count, brier_sum),
+            quartic: Ledger::from_parts(Quartic {}, count, quartic_sum),
+            reliability,
+        }
+    }
+
+    pub fn record(mut self, _ probability: u256, _ outcome: bool) {
+        self.brier.record(probability, outcome)
+        self.quartic.record(probability, outcome)
+        self.reliability.record(probability, outcome)
+    }
+
+    pub fn merged(self, _ other: own ForecastSummary) -> ForecastSummary {
+        ForecastSummary {
+            brier: self.brier.merged(other.brier),
+            quartic: self.quartic.merged(other.quartic),
+            reliability: self.reliability.merged(other.reliability),
+        }
+    }
+
+    pub fn count(self) -> u256 {
+        self.brier.count()
+    }
+
+    pub fn score_sums(self) -> (u256, u256) {
+        (self.brier.loss_sum(), self.quartic.loss_sum())
+    }
+
+    pub fn scores(self) -> (u256, u256) {
+        (self.brier.score_micro(), self.quartic.score_micro())
+    }
+
+    pub fn bin_parts(self, _ index: u256) -> (u256, u256, u256) {
+        self.reliability.bin_parts(index)
+    }
+
+    pub fn bin(self, _ index: u256) -> (u256, u256, u256, u256, u256) {
+        self.reliability.snapshot(index)
+    }
+}

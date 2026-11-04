@@ -1,0 +1,108 @@
+// Proper scoring rules on a fixed 0..1,000,000 probability scale.
+// Event losses stay as exact numerators. Division happens only when a caller
+// asks for a mean score, so shard boundaries cannot introduce rounding drift.
+
+pub const SCALE: u256 = 1000000
+const MAX_EVENTS: u256 = 18446744073709551615
+
+pub trait ScoringRule: Copy {
+    /// Exact denominator shared by every event scored by this rule.
+    fn denominator() -> u256
+
+    /// Exact loss numerator for one binary forecast.
+    fn loss_numerator(_ probability: u256, _ outcome: bool) -> u256
+}
+
+pub struct Brier {}
+impl Copy for Brier {}
+
+impl ScoringRule for Brier {
+    fn denominator() -> u256 {
+        SCALE * SCALE
+    }
+
+    fn loss_numerator(_ probability: u256, _ outcome: bool) -> u256 {
+        assert!(probability <= SCALE)
+        let target = if outcome { SCALE } else { 0 }
+        let error = if probability >= target {
+            probability - target
+        } else {
+            target - probability
+        }
+        error * error
+    }
+}
+
+/// A strictly proper quartic binary loss with exact integer arithmetic.
+///
+/// For normalized absolute error d in [0, 1], loss is 4d^3 - 3d^4.
+/// Its expected-loss derivative for true event probability q is
+/// 12*p*(1-p)*(p-q), so q is the unique minimum for q in (0,1), with the
+/// correct boundary minima at q=0 and q=1. No lookup table is involved.
+pub struct Quartic {}
+impl Copy for Quartic {}
+
+impl ScoringRule for Quartic {
+    fn denominator() -> u256 {
+        let square = SCALE * SCALE
+        square * square
+    }
+
+    fn loss_numerator(_ probability: u256, _ outcome: bool) -> u256 {
+        assert!(probability <= SCALE)
+        let target = if outcome { SCALE } else { 0 }
+        let error = if probability >= target {
+            probability - target
+        } else {
+            target - probability
+        }
+        let cube = error * error * error
+        cube * (4 * SCALE - 3 * error)
+    }
+}
+
+/// Mergeable loss accumulator for any fixed-denominator scoring rule.
+pub struct Ledger<R: ScoringRule> { rule: R, count: u256, loss_sum: u256 }
+
+impl<R: ScoringRule> Ledger<R> {
+    pub fn empty(_ rule: R) -> Ledger<R> {
+        Ledger { rule, count: 0, loss_sum: 0 }
+    }
+
+    pub fn from_parts(_ rule: R, _ count: u256, _ loss_sum: u256) -> Ledger<R> {
+        assert!(count <= MAX_EVENTS)
+        Ledger { rule, count, loss_sum }
+    }
+
+    pub fn count(self) -> u256 {
+        self.count
+    }
+
+    pub fn loss_sum(self) -> u256 {
+        self.loss_sum
+    }
+
+    pub fn record(mut self, _ probability: u256, _ outcome: bool) {
+        assert!(self.count < MAX_EVENTS)
+        self.count += 1
+        self.loss_sum += R::loss_numerator(probability, outcome)
+    }
+
+    pub fn merged(self, _ other: own Ledger<R>) -> Ledger<R> {
+        assert!(self.count <= MAX_EVENTS - other.count)
+        Ledger {
+            rule: self.rule,
+            count: self.count + other.count,
+            loss_sum: self.loss_sum + other.loss_sum,
+        }
+    }
+
+    /// Mean loss on a 0..1,000,000 scale, rounded half up once at query time.
+    pub fn score_micro(self) -> u256 {
+        if self.count == 0 {
+            return 0
+        }
+        let denominator = self.count * R::denominator()
+        (self.loss_sum * SCALE + denominator / 2) / denominator
+    }
+}
