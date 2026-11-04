@@ -10,4 +10,4 @@ The project lead should fill this section in before submission with the specific
 
 ## Pre-existing work
 
-No Forecast Lens implementation predates the contest build window. The only starting material reused in this repository is the Fe Builders Challenge starter's CI structure and Apache-2.0 license, plus Fe's standard library.
+An earlier internal Forecast Lens attempt began November 3, 2026, within the contest build window; its `w710-sequence-guard` revision was made November 4. This smaller project rewrote the contract around `ScoringRule`, a generic `Ledger`, mergeable summaries, packed five-bin storage, and a typed message interface. Its Brier error calculation, Newton integer square root, and Wilson interval arithmetic reuse code from that earlier attempt. The contest starter's CI and Apache-2.0 license were also reused. Fe's standard library is a dependency, not original code.
