@@ -1,0 +1,80 @@
+{
+  "source_fixture": "kalshi_btc15m.json",
+  "count": 6113,
+  "brier_micro": 1,
+  "quartic_micro": 0,
+  "brier_sum": 7136000000,
+  "quartic_sum": 87946176000000000000,
+  "bins": [
+    {
+      "bin": 0,
+      "range": [
+        0,
+        200000
+      ],
+      "count": 3082,
+      "mean_quote_micro": 1016,
+      "yes_rate_micro": 0,
+      "wilson_lower_micro": 0,
+      "wilson_upper_micro": 1245,
+      "positives": 0,
+      "probability_sum": 3130000
+    },
+    {
+      "bin": 1,
+      "range": [
+        200000,
+        400000
+      ],
+      "count": 0,
+      "mean_quote_micro": 0,
+      "yes_rate_micro": 0,
+      "wilson_lower_micro": 0,
+      "wilson_upper_micro": 1000000,
+      "positives": 0,
+      "probability_sum": 0
+    },
+    {
+      "bin": 2,
+      "range": [
+        400000,
+        600000
+      ],
+      "count": 0,
+      "mean_quote_micro": 0,
+      "yes_rate_micro": 0,
+      "wilson_lower_micro": 0,
+      "wilson_upper_micro": 1000000,
+      "positives": 0,
+      "probability_sum": 0
+    },
+    {
+      "bin": 3,
+      "range": [
+        600000,
+        800000
+      ],
+      "count": 0,
+      "mean_quote_micro": 0,
+      "yes_rate_micro": 0,
+      "wilson_lower_micro": 0,
+      "wilson_upper_micro": 1000000,
+      "positives": 0,
+      "probability_sum": 0
+    },
+    {
+      "bin": 4,
+      "range": [
+        800000,
+        1000000
+      ],
+      "count": 3031,
+      "mean_quote_micro": 998990,
+      "yes_rate_micro": 1000000,
+      "wilson_lower_micro": 998734,
+      "wilson_upper_micro": 1000000,
+      "positives": 3031,
+      "probability_sum": 3027938000
+    }
+  ]
+}

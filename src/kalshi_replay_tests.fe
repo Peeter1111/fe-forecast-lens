@@ -1,0 +1,59 @@
+use ingot::{ForecastLens, ForecastLensMsg}
+use ingot::kalshi_fixture::{KALSHI_CODES, KALSHI_COUNTS, KALSHI_EVENT_COUNT, KALSHI_UNIQUE_COUNT}
+use std::evm::Evm
+
+// The fixture is 6,113 real settled KXBTC15M markets compressed into exact
+// (price,outcome) frequencies. Grouping changes order, never aggregate state.
+#[test]
+fn replays_real_kalshi_markets_through_contract() uses (evm: mut Evm) {
+    let lens = evm.create2<ForecastLens>(value: Wei::zero(), args: (), salt: 6113)
+    var i: usize = 0
+    var replayed: u256 = 0
+    while i < KALSHI_UNIQUE_COUNT {
+        let encoded = KALSHI_CODES[i]
+        let probability = encoded / 2
+        let outcome = encoded % 2 == 1
+        var remaining = KALSHI_COUNTS[i]
+        while remaining > 0 {
+            let _: u256 = evm
+                .call(
+                    addr: lens,
+                    gas: 3000000,
+                    value: Wei::zero(),
+                    message: ForecastLensMsg::Record { probability, outcome },
+                )
+            replayed += 1
+            remaining -= 1
+        }
+        i += 1
+    }
+    assert!(replayed == KALSHI_EVENT_COUNT)
+
+    let (count, brier): (u256, u256) = evm
+        .call(
+            addr: lens,
+            gas: 2000000,
+            value: Wei::zero(),
+            message: ForecastLensMsg::Scores {},
+        )
+    assert!(count == 6113)
+    assert!(brier == 1)
+
+    let low: (u256, u256, u256, u256, u256) = evm
+        .call(
+            addr: lens,
+            gas: 2000000,
+            value: Wei::zero(),
+            message: ForecastLensMsg::BinView { index: 0 },
+        )
+    assert!(low == (3082, 1016, 0, 0, 1245))
+
+    let high: (u256, u256, u256, u256, u256) = evm
+        .call(
+            addr: lens,
+            gas: 2000000,
+            value: Wei::zero(),
+            message: ForecastLensMsg::BinView { index: 4 },
+        )
+    assert!(high == (3031, 998990, 1000000, 998734, 1000000))
+}
