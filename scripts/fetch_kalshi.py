@@ -18,6 +18,7 @@ import tempfile
 import time
 import urllib.parse
 import urllib.request
+import urllib.error
 from decimal import Decimal
 from pathlib import Path
 
@@ -32,18 +33,29 @@ END = dt.datetime(2026, 11, 2, tzinfo=dt.timezone.utc)
 SCALE = 1_000_000
 LEAD_SECONDS = 300
 EVENT_STRIDE = (SCALE + 1) * 2
+_last_request_started: float | None = None
 
 
-def get_bytes(url: str) -> bytes:
+def get_bytes(url: str, cache_dir: Path) -> bytes:
+    global _last_request_started
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cached = cache_dir / (hashlib.sha256(url.encode()).hexdigest() + ".json")
+    if cached.exists():
+        return cached.read_bytes()
     last: Exception | None = None
     for attempt in range(5):
         try:
+            if _last_request_started is not None:
+                time.sleep(max(0.0, 1.0 - (time.monotonic() - _last_request_started)))
             request = urllib.request.Request(url, headers={"User-Agent": UA})
+            _last_request_started = time.monotonic()
             with urllib.request.urlopen(request, timeout=40) as response:
                 body = response.read()
-            time.sleep(0.35)
+            cached.write_bytes(body)
             return body
         except Exception as exc:  # retry only network/public-API failures
+            if isinstance(exc, urllib.error.HTTPError) and exc.code == 429:
+                raise SystemExit("Kalshi throttled the fetch; stopped without retrying") from exc
             last = exc
             if attempt == 4:
                 raise
@@ -68,7 +80,7 @@ def paged_markets(raw_dir: Path) -> tuple[list[dict], list[dict]]:
         if cursor:
             params["cursor"] = cursor
         url = BASE + "/markets?" + urllib.parse.urlencode(params)
-        body = get_bytes(url)
+        body = get_bytes(url, raw_dir / ".http-cache")
         path = raw_dir / f"markets-{page:02d}.json"
         path.write_bytes(body)
         manifest.append(
@@ -126,7 +138,7 @@ def preclose_quotes(rows: list[dict], raw_dir: Path) -> tuple[list[dict], dict, 
         url = BASE + "/markets/trades?" + urllib.parse.urlencode(
             {"ticker": row["ticker"], "limit": 1, "max_ts": cutoff}
         )
-        body = get_bytes(url)
+        body = get_bytes(url, raw_dir / ".http-cache")
         path = trade_dir / (row["ticker"] + ".json")
         path.write_bytes(body)
         manifest.append(

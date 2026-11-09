@@ -89,6 +89,7 @@ fe --version
 fe fmt --check && fe check && fe build && fe test
 python3 scripts/oracle.py --check
 python3 scripts/replay.py
+python3 scripts/test_fetch_kalshi.py
 python3 scripts/fetch_kalshi.py --check --raw-dir /tmp/forecast-lens-raw  # network
 fe build bench/naive
 uv run --script scripts/audit_demo.py
@@ -97,7 +98,7 @@ uv run --script scripts/gas_bench.py
 
 The Fe suite runs 10,000 seeded merge-order cases. `scripts/oracle.py` independently uses Python `Fraction` arithmetic for another 10,000 randomized partition/order cases.
 
-Python 3.11+ is enough for the oracle, replay, and fetch scripts. The two EVM scripts use `uv` to install their declared PyEVM dependencies in an isolated environment. The fetch script saves raw API responses and checksums to the chosen external directory, not the repository.
+Python 3.11+ is enough for the oracle, replay, and fetch scripts. The two EVM scripts use `uv` to install their declared PyEVM dependencies in an isolated environment. The fetch script saves raw API responses and checksums to the chosen external directory, not the repository. It caches responses by URL, starts requests at least one second apart, and stops immediately on HTTP 429.
 
 ## Demo
 
