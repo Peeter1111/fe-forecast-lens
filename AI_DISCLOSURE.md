@@ -4,9 +4,13 @@ This project was built with AI assistance from ChatGPT worker chats and reviewed
 
 The automated work was checked by compiling and testing with Fe 26.5.0 and by independent Python arithmetic where noted in the repository. No AI-generated claim is intended to substitute for those reproducible checks.
 
-## Human review before submission
+## Review before submission
 
-The project lead should fill this section in before submission with the specific code, mathematics, data-selection rule, benchmark commands, and documentation personally checked by a human.
+No human programmer reviewed this code. The entrant, Peeter Tsanev, is not a programmer. He chose to enter and approved publishing. AI agents did the design, the implementation and every review:
+
+- ChatGPT worker chats wrote the implementation, tests, scripts and documentation.
+- Claude wrote the project brief and read every file in `src/` on November 9, 2026.
+- OpenAI Codex, in a separate session, built the earlier and the current revision on November 9, 2026, and wrote 4 regression checks. Each check fails on the earlier revision and passes on the current one.
 
 ## Pre-existing work
 
